@@ -82,8 +82,9 @@ const $=id=>document.getElementById(id);
 function fail(t){ $('load').hidden=false; $('loadmsg').textContent=t; $('bar').hidden=true; }
 if(!window.THREE||!THREE.GLTFLoader){ fail('3D graphics could not start in this browser.'); return; }
 const canvas=$('view'); let renderer;
-try{ renderer=new THREE.WebGLRenderer({canvas,antialias:true}); }catch(e){ fail('3D graphics could not start in this browser.'); return; }
-renderer.setPixelRatio(Math.min(devicePixelRatio||1,2)); renderer.outputEncoding=THREE.sRGBEncoding;
+const LITE=matchMedia('(pointer:coarse)').matches||Math.min(screen.width,screen.height)<700;
+try{ renderer=new THREE.WebGLRenderer({canvas,antialias:!LITE,powerPreference:'high-performance'}); }catch(e){ fail('3D graphics could not start in this browser.'); return; }
+renderer.setPixelRatio(Math.min(devicePixelRatio||1,LITE?1.5:2)); renderer.outputEncoding=THREE.sRGBEncoding;
 const scene=new THREE.Scene(); scene.background=new THREE.Color(0xa9c4e0);
 const cam=new THREE.PerspectiveCamera(72,1,0.05,300);
 const FH=3.2, F2=FH+0.02, R=FH/18, PR=0.2, EYE=1.58;
@@ -100,7 +101,7 @@ function conv(m){ if(mcache.has(m.uuid)) return mcache.get(m.uuid); const n=base
   else if(n==='TV screen') r=new THREE.MeshBasicMaterial({color:0x08090a,envMap:env,combine:THREE.MixOperation,reflectivity:.12});
   else if(n==='Brushed steel'||n==='Brass') r=new THREE.MeshBasicMaterial({color:flatCol[n],envMap:env,combine:THREE.MixOperation,reflectivity:.35});
   else r=new THREE.MeshBasicMaterial({color:flatCol[n]!==undefined?flatCol[n]:(m.color?m.color.getHex():0x888888),side:THREE.DoubleSide});
-  if(m.map){ m.map.anisotropy=Math.min(8,renderer.capabilities.getMaxAnisotropy()); }
+  if(m.map){ if(LITE){ m.map.generateMipmaps=false; m.map.minFilter=THREE.LinearFilter; } else m.map.anisotropy=Math.min(8,renderer.capabilities.getMaxAnisotropy()); }
   mcache.set(m.uuid,r); return r; }
 
 // ---------- collision data ----------
@@ -221,9 +222,11 @@ const getEnv=new Promise(res=>new THREE.TextureLoader().load('env.jpg',t=>{ t.ma
 Promise.all([getJ('manifest.json'),getJ('colliders.json'),getEnv]).then(([man,cd,e])=>{ env=e; addCols(cd);
   const total=man.files.reduce((a,f)=>a+f.bytes,0), got={};
   const show=()=>{ const s=Object.values(got).reduce((a,b)=>a+b,0); $('bar').firstElementChild.style.width=Math.min(100,s/total*100)+'%'; };
-  return Promise.all(man.files.map(f=>new Promise((res,rej)=>gl.load(f.file,g=>{ got[f.file]=f.bytes; show();
+  const one=f=>new Promise((res,rej)=>gl.load((window.__flat?'':(LITE?'m/':''))+f.file,g=>{ got[f.file]=f.bytes; show();
       g.scene.traverse(o=>{ if(o.isMesh){ o.material=Array.isArray(o.material)?o.material.map(conv):conv(o.material); o.matrixAutoUpdate=false; o.updateMatrix(); } });
-      scene.add(g.scene); res(); },x=>{ got[f.file]=Math.min(f.bytes,x.loaded); show(); },rej))));
+      scene.add(g.scene); res(); },x=>{ got[f.file]=Math.min(f.bytes,x.loaded); show(); },rej));
+  if(!LITE) return Promise.all(man.files.map(one));
+  return man.files.reduce((q,f)=>q.then(()=>one(f)),Promise.resolve());   // phones: one piece at a time to keep memory low
 }).then(()=>{ $('load').hidden=true; $('intro').hidden=false; requestAnimationFrame(frame); })
  .catch(()=>fail('The house could not be loaded. Check your connection and reload the page.'));
 })();
